@@ -1,6 +1,6 @@
---- a/target/linux/mvebu/dts/armada-385-linksys-cobra.dts
-+++ b/target/linux/mvebu/dts/armada-385-linksys-cobra.dts
-@@ -83,11 +83,9 @@
+--- a/target/linux/mvebu/dts/armada-385-linksys-caiman.dts
++++ b/target/linux/mvebu/dts/armada-385-linksys-caiman.dts
+@@ -81,11 +81,9 @@
  			reg = <0x6c0000 0x7940000>;
  
  			partitions {
