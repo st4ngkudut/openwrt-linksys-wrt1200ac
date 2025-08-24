@@ -1,0 +1,61 @@
+name: Build WRT1200AC Single-Partition
+
+on:
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Install build dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y build-essential clang flex bison g++ gawk gcc-multilib g++-multilib \
+          gettext git libncurses5-dev libssl-dev python3-distutils rsync unzip zlib1g-dev \
+          file wget
+
+      - name: Clone OpenWrt source code
+        run: git clone https://git.openwrt.org/openwrt/openwrt.git
+
+      - name: Update OpenWrt feeds
+        run: |
+          cd openwrt
+          ./scripts/feeds update -a
+          ./scripts/feeds install -a
+
+      - name: Copy custom DTS patch
+        # Ini langkah krusial untuk menyalin patch Anda ke lokasi yang benar
+        # Wildcard (*) digunakan agar kompatibel dengan berbagai versi kernel
+        run: |
+          cp *.patch openwrt/target/linux/mvebu/patches-*/
+
+      - name: Copy custom build config
+        run: cp wrt1200ac.config openwrt/.config
+
+      - name: Make defconfig
+        run: |
+          cd openwrt
+          make defconfig
+
+      - name: Compile firmware
+        run: |
+          cd openwrt
+          make -j$(nproc) download V=s
+          make -j$(nproc) V=s
+
+      - name: Prepare artifact
+        run: |
+          mkdir -p artifacts
+          cp openwrt/bin/targets/mvebu/cortexa9/*sysupgrade.img artifacts/
+          cp openwrt/bin/targets/mvebu/cortexa9/sha256sums artifacts/
+          cp openwrt/.config artifacts/final.config
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: openwrt-firmware-wrt1200ac-single-partition
+          path: artifacts/
