@@ -1,0 +1,137 @@
+name: Build OpenWrt (WRT1200AC)
+
+on:
+  push:
+    branches: [ main, master ]
+  workflow_dispatch:
+
+env:
+  JOBS: ${{ github.runner_id && runner.cores || 2 }}
+  IMAGE_PROFILE: "linksys_wrt1200ac"
+  PATCH_PATH: ".github/patches/single-firmware-wrt1200ac.patch"
+  RELEASE_TAG_PREFIX: "openwrt-build"
+
+jobs:
+  build:
+    name: Build OpenWrt image
+    runs-on: ubuntu-latest
+    timeout-minutes: 360
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Set up QEMU (optional, for native tools)
+        uses: docker/setup-qemu-action@v2
+
+      - name: Cache OpenWrt downloads
+        uses: actions/cache@v4
+        with:
+          path: |
+            downloads
+          key: ${{ runner.os }}-openwrt-downloads-${{ hashFiles('feeds.conf*', 'package/*/Makefile') }}
+          restore-keys: |
+            ${{ runner.os }}-openwrt-downloads-
+
+      - name: Cache build_dir and sstate (partial)
+        uses: actions/cache@v4
+        with:
+          path: |
+            build_dir
+            tmp
+            files
+          key: ${{ runner.os }}-openwrt-build-${{ github.sha }}
+          restore-keys: |
+            ${{ runner.os }}-openwrt-build-
+
+      - name: Install APT dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends build-essential libncurses5-dev gawk git ccache ecj fastjar gettext unzip python3 python3-distutils rsync unzip subversion flex bison libssl-dev time bc
+
+      - name: Show git branch/commit
+        run: |
+          echo "Branch: $(git rev-parse --abbrev-ref HEAD)"
+          echo "Commit: $(git rev-parse --short HEAD)"
+
+      - name: (Optional) Apply single-firmware patch if present
+        if: ${{ always() }}
+        run: |
+          if [ -f "${{ env.PATCH_PATH }}" ]; then
+            echo "Found patch at ${{ env.PATCH_PATH }}, applying..."
+            git apply --index "${{ env.PATCH_PATH }}" || (echo "git apply failed, showing patch" && sed -n '1,200p' "${{ env.PATCH_PATH }}" && exit 1)
+            git add -A
+            git commit -m "ci: apply single-firmware patch (auto)" || echo "no commit (maybe already applied)"
+          else
+            echo "No patch file found at ${{ env.PATCH_PATH }}, continuing without it."
+          fi
+
+      - name: Update feeds
+        run: |
+          ./scripts/feeds update -a
+          ./scripts/feeds install -a
+
+      - name: Prepare build config (ensure profile)
+        run: |
+          # Ensure the correct profile is selected for non-interactive builds.
+          # This attempts to set PROFILE in the config if not already present.
+          if ! grep -q "CONFIG_TARGET_DEVICE_PACKAGES.*${{ env.IMAGE_PROFILE }}" .config 2>/dev/null; then
+            echo "PROFILE=${{ env.IMAGE_PROFILE }}" > ./.ci_profile
+          fi
+          cat ./.ci_profile || true
+
+      - name: Build OpenWrt image (profile)
+        run: |
+          # Build image for the specified profile. This uses the OpenWrt "image" target.
+          # Builds can be long; JOBS controls parallelism.
+          make -j${{ env.JOBS }} image PROFILE=${{ env.IMAGE_PROFILE }} V=s || (echo "Build failed, dumping last 200 lines of build.log if exists" && tail -n 200 logs/* || true && false)
+
+      - name: Collect artifacts
+        run: |
+          mkdir -p artifacts
+          find bin/targets -type f -name "*${{ env.IMAGE_PROFILE }}*.bin" -print -exec cp {} artifacts/ \; || true
+          # also collect generic images
+          find bin -type f -name "openwrt-*-initramfs-kernel.bin" -print -exec cp {} artifacts/ \; || true
+          ls -lah artifacts || true
+
+      - name: Upload artifacts to workflow
+        uses: actions/upload-artifact@v4
+        with:
+          name: openwrt-artifacts-${{ github.run_id }}
+          path: artifacts/
+
+      - name: Create Release and upload images
+        id: release
+        uses: softprops/action-gh-release@v1
+        with:
+          tag_name: ${{ env.RELEASE_TAG_PREFIX }}-${{ github.run_number }}
+          name: OpenWrt build #${{ github.run_number }} for ${{ env.IMAGE_PROFILE }}
+          draft: false
+          prerelease: true
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Upload release assets
+        if: steps.release.outputs.upload_url != ''
+        uses: softprops/action-gh-release@v1
+        with:
+          tag_name: ${{ env.RELEASE_TAG_PREFIX }}-${{ github.run_number }}
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Upload artifacts to release
+        if: steps.release.outputs.upload_url != ''
+        uses: actions/upload-release-asset@v1
+        with:
+          upload_url: ${{ steps.release.outputs.upload_url }}
+          asset_path: artifacts
+          asset_name: openwrt-artifacts-${{ github.run_number }}.tar.gz
+          asset_content_type: application/gzip
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Finish
+        run: |
+          echo "Workflow finished. Artifacts uploaded as workflow artifact and release."
