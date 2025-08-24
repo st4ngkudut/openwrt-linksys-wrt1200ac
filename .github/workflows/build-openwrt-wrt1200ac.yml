@@ -1,8 +1,6 @@
-name: Build OpenWrt (WRT1200AC)
+name: Build OpenWrt (WRT1200AC) - Manual Trigger
 
 on:
-  push:
-    branches: [ main, master ]
   workflow_dispatch:
     inputs:
       profile:
@@ -22,17 +20,19 @@ on:
         required: false
         default: '2'
 
-env:
-  IMAGE_PROFILE: ${{ github.event.inputs.profile || 'linksys_wrt1200ac' }}
-  PATCH_PATH: ${{ github.event.inputs.patch_path || '.github/patches/single-firmware-wrt1200ac.patch' }}
-  APPLY_PATCH: ${{ github.event.inputs.apply_patch || 'true' }}
-  JOBS: ${{ github.event.inputs.jobs || '2' }}
-  RELEASE_TAG_PREFIX: "openwrt-build"
-
 jobs:
   build:
-    name: Build OpenWrt image
+    name: Build OpenWrt image (manual)
     runs-on: ubuntu-latest
+    timeout-minutes: 360
+
+    env:
+      # These env values read from inputs at runtime
+      IMAGE_PROFILE: ${{ github.event.inputs.profile }}
+      PATCH_PATH: ${{ github.event.inputs.patch_path }}
+      APPLY_PATCH: ${{ github.event.inputs.apply_patch }}
+      JOBS: ${{ github.event.inputs.jobs }}
+      RELEASE_TAG_PREFIX: "openwrt-build"
 
     steps:
       - name: Checkout repository
@@ -55,7 +55,6 @@ jobs:
         run: |
           if [ -f "${{ env.PATCH_PATH }}" ]; then
             echo "Found patch at ${{ env.PATCH_PATH }}, applying in working tree..."
-            # apply patch to working tree but do not commit to keep history clean
             git apply --verbose "${{ env.PATCH_PATH }}" || (echo "git apply failed" && sed -n '1,200p' "${{ env.PATCH_PATH }}" && exit 1)
           else
             echo "No patch file found at ${{ env.PATCH_PATH }}, continuing without it."
@@ -79,8 +78,6 @@ jobs:
 
       - name: Prepare non-interactive config
         run: |
-          # Ensure the correct profile is selected for non-interactive builds.
-          # This creates a minimal .config if none exists.
           if [ ! -f .config ]; then
             echo "CONFIG_TARGET_mvebu=y" > .config
             echo "CONFIG_TARGET_mvebu_cortexa9=y" >> .config
@@ -95,9 +92,7 @@ jobs:
       - name: Collect artifacts
         run: |
           mkdir -p artifacts
-          # Collect device-specific images
           find bin/targets -type f -name "*${{ env.IMAGE_PROFILE }}*.bin" -print -exec cp {} artifacts/ \; || true
-          # Collect generic images (initramfs, sysupgrade)
           find bin -type f -name "openwrt-*-initramfs-kernel.bin" -print -exec cp {} artifacts/ \; || true
           find bin -type f -name "openwrt-*-sysupgrade.bin" -print -exec cp {} artifacts/ \; || true
           ls -lah artifacts || true
