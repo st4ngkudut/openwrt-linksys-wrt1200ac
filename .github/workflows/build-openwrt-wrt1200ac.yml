@@ -4,18 +4,35 @@ on:
   push:
     branches: [ main, master ]
   workflow_dispatch:
+    inputs:
+      profile:
+        description: 'Device profile (PROFILE value)'
+        required: false
+        default: 'linksys_wrt1200ac'
+      apply_patch:
+        description: 'If true, apply patch at .github/patches/single-firmware-wrt1200ac.patch'
+        required: false
+        default: 'true'
+      patch_path:
+        description: 'Path to patch to apply (relative)'
+        required: false
+        default: '.github/patches/single-firmware-wrt1200ac.patch'
+      jobs:
+        description: 'Parallel build jobs (make -j)'
+        required: false
+        default: '2'
 
 env:
-  JOBS: ${{ github.runner_id && runner.cores || 2 }}
-  IMAGE_PROFILE: "linksys_wrt1200ac"
-  PATCH_PATH: ".github/patches/single-firmware-wrt1200ac.patch"
+  IMAGE_PROFILE: ${{ github.event.inputs.profile || 'linksys_wrt1200ac' }}
+  PATCH_PATH: ${{ github.event.inputs.patch_path || '.github/patches/single-firmware-wrt1200ac.patch' }}
+  APPLY_PATCH: ${{ github.event.inputs.apply_patch || 'true' }}
+  JOBS: ${{ github.event.inputs.jobs || '2' }}
   RELEASE_TAG_PREFIX: "openwrt-build"
 
 jobs:
   build:
     name: Build OpenWrt image
     runs-on: ubuntu-latest
-    timeout-minutes: 360
 
     steps:
       - name: Checkout repository
@@ -23,47 +40,23 @@ jobs:
         with:
           fetch-depth: 0
 
-      - name: Set up QEMU (optional, for native tools)
-        uses: docker/setup-qemu-action@v2
-
-      - name: Cache OpenWrt downloads
-        uses: actions/cache@v4
-        with:
-          path: |
-            downloads
-          key: ${{ runner.os }}-openwrt-downloads-${{ hashFiles('feeds.conf*', 'package/*/Makefile') }}
-          restore-keys: |
-            ${{ runner.os }}-openwrt-downloads-
-
-      - name: Cache build_dir and sstate (partial)
-        uses: actions/cache@v4
-        with:
-          path: |
-            build_dir
-            tmp
-            files
-          key: ${{ runner.os }}-openwrt-build-${{ github.sha }}
-          restore-keys: |
-            ${{ runner.os }}-openwrt-build-
-
       - name: Install APT dependencies
         run: |
           sudo apt-get update
-          sudo apt-get install -y --no-install-recommends build-essential libncurses5-dev gawk git ccache ecj fastjar gettext unzip python3 python3-distutils rsync unzip subversion flex bison libssl-dev time bc
+          sudo apt-get install -y --no-install-recommends build-essential libncurses5-dev gawk git ccache ecj fastjar gettext unzip python3 python3-distutils rsync subversion flex bison libssl-dev time bc
 
       - name: Show git branch/commit
         run: |
           echo "Branch: $(git rev-parse --abbrev-ref HEAD)"
           echo "Commit: $(git rev-parse --short HEAD)"
 
-      - name: (Optional) Apply single-firmware patch if present
-        if: ${{ always() }}
+      - name: (Optional) Apply single-firmware patch if present (non-committal)
+        if: ${{ env.APPLY_PATCH == 'true' }}
         run: |
           if [ -f "${{ env.PATCH_PATH }}" ]; then
-            echo "Found patch at ${{ env.PATCH_PATH }}, applying..."
-            git apply --index "${{ env.PATCH_PATH }}" || (echo "git apply failed, showing patch" && sed -n '1,200p' "${{ env.PATCH_PATH }}" && exit 1)
-            git add -A
-            git commit -m "ci: apply single-firmware patch (auto)" || echo "no commit (maybe already applied)"
+            echo "Found patch at ${{ env.PATCH_PATH }}, applying in working tree..."
+            # apply patch to working tree but do not commit to keep history clean
+            git apply --verbose "${{ env.PATCH_PATH }}" || (echo "git apply failed" && sed -n '1,200p' "${{ env.PATCH_PATH }}" && exit 1)
           else
             echo "No patch file found at ${{ env.PATCH_PATH }}, continuing without it."
           fi
@@ -73,37 +66,58 @@ jobs:
           ./scripts/feeds update -a
           ./scripts/feeds install -a
 
-      - name: Prepare build config (ensure profile)
+      - name: Cache build artifacts (download/tmp/build_dir)
+        uses: actions/cache@v4
+        with:
+          path: |
+            downloads
+            tmp
+            build_dir
+          key: ${{ runner.os }}-openwrt-build-${{ hashFiles('feeds.conf*', 'package/*/Makefile') }}-${{ github.sha }}
+          restore-keys: |
+            ${{ runner.os }}-openwrt-build-
+
+      - name: Prepare non-interactive config
         run: |
           # Ensure the correct profile is selected for non-interactive builds.
-          # This attempts to set PROFILE in the config if not already present.
-          if ! grep -q "CONFIG_TARGET_DEVICE_PACKAGES.*${{ env.IMAGE_PROFILE }}" .config 2>/dev/null; then
-            echo "PROFILE=${{ env.IMAGE_PROFILE }}" > ./.ci_profile
+          # This creates a minimal .config if none exists.
+          if [ ! -f .config ]; then
+            echo "CONFIG_TARGET_mvebu=y" > .config
+            echo "CONFIG_TARGET_mvebu_cortexa9=y" >> .config
           fi
-          cat ./.ci_profile || true
+          make defconfig
 
       - name: Build OpenWrt image (profile)
         run: |
-          # Build image for the specified profile. This uses the OpenWrt "image" target.
-          # Builds can be long; JOBS controls parallelism.
-          make -j${{ env.JOBS }} image PROFILE=${{ env.IMAGE_PROFILE }} V=s || (echo "Build failed, dumping last 200 lines of build.log if exists" && tail -n 200 logs/* || true && false)
+          echo "Building PROFILE=${{ env.IMAGE_PROFILE }} with -j${{ env.JOBS }}"
+          make -j${{ env.JOBS }} image PROFILE=${{ env.IMAGE_PROFILE }} V=s || (echo "Build failed, dumping last 200 lines of build log" && tail -n 200 logs/* || true && false)
 
       - name: Collect artifacts
         run: |
           mkdir -p artifacts
+          # Collect device-specific images
           find bin/targets -type f -name "*${{ env.IMAGE_PROFILE }}*.bin" -print -exec cp {} artifacts/ \; || true
-          # also collect generic images
+          # Collect generic images (initramfs, sysupgrade)
           find bin -type f -name "openwrt-*-initramfs-kernel.bin" -print -exec cp {} artifacts/ \; || true
+          find bin -type f -name "openwrt-*-sysupgrade.bin" -print -exec cp {} artifacts/ \; || true
           ls -lah artifacts || true
 
-      - name: Upload artifacts to workflow
+      - name: Package artifacts
+        run: |
+          mkdir -p release
+          TARFILE=release/openwrt-${{ env.IMAGE_PROFILE }}-${{ github.run_number }}.tar.gz
+          tar -czf "$TARFILE" -C artifacts .
+          echo "$TARFILE"
+          ls -lh "$TARFILE"
+
+      - name: Upload workflow artifact
         uses: actions/upload-artifact@v4
         with:
           name: openwrt-artifacts-${{ github.run_id }}
-          path: artifacts/
+          path: release/
 
-      - name: Create Release and upload images
-        id: release
+      - name: Create GitHub Release (prerelease)
+        id: create_release
         uses: softprops/action-gh-release@v1
         with:
           tag_name: ${{ env.RELEASE_TAG_PREFIX }}-${{ github.run_number }}
@@ -113,21 +127,13 @@ jobs:
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
-      - name: Upload release assets
-        if: steps.release.outputs.upload_url != ''
-        uses: softprops/action-gh-release@v1
-        with:
-          tag_name: ${{ env.RELEASE_TAG_PREFIX }}-${{ github.run_number }}
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-
-      - name: Upload artifacts to release
-        if: steps.release.outputs.upload_url != ''
+      - name: Upload artifacts to Release
+        if: steps.create_release.outputs.upload_url != ''
         uses: actions/upload-release-asset@v1
         with:
-          upload_url: ${{ steps.release.outputs.upload_url }}
-          asset_path: artifacts
-          asset_name: openwrt-artifacts-${{ github.run_number }}.tar.gz
+          upload_url: ${{ steps.create_release.outputs.upload_url }}
+          asset_path: release/openwrt-${{ env.IMAGE_PROFILE }}-${{ github.run_number }}.tar.gz
+          asset_name: openwrt-${{ env.IMAGE_PROFILE }}-${{ github.run_number }}.tar.gz
           asset_content_type: application/gzip
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
