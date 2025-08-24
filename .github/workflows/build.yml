@@ -1,4 +1,4 @@
-name: Build OpenWrt Linksys Wrt1200Ac
+name: Build OpenWrt Firmware (Advanced)
 
 on:
   workflow_dispatch:
@@ -51,22 +51,15 @@ jobs:
         run: |
           git clone https://git.openwrt.org/openwrt/openwrt.git
           cd openwrt
-
           VERSION="${{ inputs.openwrt_version }}"
           REF_TO_CHECKOUT=""
-
-          # Logika untuk menentukan referensi Git (Tag atau Branch)
-          # Jika versi adalah point release (contoh: 23.05.2), gunakan sebagai tag dengan prefix 'v'
           if [[ "$VERSION" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
             REF_TO_CHECKOUT="v$VERSION"
-          # Jika versi adalah rilis mayor (contoh: 23.05), gunakan sebagai branch
           elif [[ "$VERSION" =~ ^[0-9]+\.[0-9]+$ ]]; then
             REF_TO_CHECKOUT="openwrt-$VERSION"
-          # Jika tidak, anggap sebagai branch 'main' (snapshot)
           else
             REF_TO_CHECKOUT="main"
           fi
-          
           echo "==> Checking out Git reference: $REF_TO_CHECKOUT"
           git checkout "$REF_TO_CHECKOUT"
 
@@ -95,35 +88,34 @@ jobs:
         run: |
           cd openwrt
           echo "==> Generating configuration..."
-          # Mulai dengan config dasar untuk perangkat
           echo "CONFIG_TARGET_mvebu_cortexa9=y" > .config
           echo "CONFIG_TARGET_mvebu_cortexa9_DEVICE_linksys_wrt1200ac=y" >> .config
-          
-          # Tambahkan paket dari packages.txt jika file ada
           if [ -f "../packages.txt" ]; then
             echo "==> Adding packages from packages.txt..."
             cat ../packages.txt >> .config
           fi
-          
-          # Finalisasi konfigurasi
           make defconfig
 
       - name: Compile firmware
+        # '|| true' ditambahkan agar workflow tidak berhenti jika kompilasi gagal
+        # Ini memungkinkan kita untuk mengunggah log dan file output parsial untuk debug
         run: |
           cd openwrt
           echo "==> Compiling firmware..."
           make -j$(nproc) download V=s
-          make -j$(nproc) V=s
+          make -j$(nproc) V=s || true
 
-      - name: Prepare artifact
+      - name: Prepare build outputs for upload
         run: |
-          mkdir -p artifacts
-          cp openwrt/bin/targets/mvebu/cortexa9/*sysupgrade.img artifacts/
-          cp openwrt/bin/targets/mvebu/cortexa9/sha256sums artifacts/
-          cp openwrt/.config artifacts/final.config
+          # Menyalin file .config yang digunakan ke dalam direktori output untuk referensi
+          cp openwrt/.config openwrt/bin/targets/mvebu/cortexa9/final.config
+          # Menyalin log build ke dalam direktori output
+          cd openwrt/logs && find . -type f -print0 | xargs -0 tar -czvf /tmp/logs.tar.gz && cd -
+          cp /tmp/logs.tar.gz openwrt/bin/targets/mvebu/cortexa9/build_logs.tar.gz
 
-      - name: Upload artifact
+      - name: Upload all build outputs as artifact
         uses: actions/upload-artifact@v4
         with:
-          name: openwrt-firmware-wrt1200ac-${{ inputs.openwrt_version }}
-          path: artifacts/
+          name: openwrt-build-outputs-${{ inputs.openwrt_version }}
+          # Mengunggah seluruh isi direktori output
+          path: openwrt/bin/targets/mvebu/cortexa9/
