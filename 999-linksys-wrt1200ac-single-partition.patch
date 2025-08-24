@@ -1,0 +1,19 @@
+--- a/target/linux/mvebu/dts/armada-385-linksys-cobra.dts
++++ b/target/linux/mvebu/dts/armada-385-linksys-cobra.dts
+@@ -83,11 +83,9 @@
+ 			reg = <0x6c0000 0x7940000>;
+ 
+ 			partitions {
+-				partition@0 {
++				partition@0 { /* firmware */
+ 					label = "firmware";
+-					reg = <0x0 0x39a0000>;
+-				};
+-				partition@1 {
+-					label = "alt_firmware";
+-					reg = <0x39a0000 0x39a0000>;
++					reg = <0x0 0x7940000>;
++					compatible = "denx,uimage";
+ 				};
+ 			};
+ 		};
