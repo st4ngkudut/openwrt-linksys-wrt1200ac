@@ -1,7 +1,5 @@
-# Nama workflow yang akan muncul di tab Actions
 name: Build OpenWrt WRT1200AC
 
-# Pemicu workflow
 on:
   workflow_dispatch:
     inputs:
@@ -11,30 +9,74 @@ on:
         default: 'v23.05.4'
         type: choice
         options:
-          # --- Branch Development ---
           - 'main'
-          # --- Rilis Mayor (Branch) ---
-          - 'openwrt-24.10'
           - 'openwrt-23.05'
           - 'openwrt-22.03'
-          # --- Rilis Spesifik (Tag) ---
-          # Seri 24.10
-          - 'v24.10.2'
-          - 'v24.10.1'
-          - 'v24.10.0'
-          # Seri 23.05
           - 'v23.05.4'
           - 'v23.05.3'
           - 'v23.05.2'
-          - 'v23.05.1'
-          - 'v23.05.0'
-          # Seri 22.03
           - 'v22.03.6'
           - 'v22.03.5'
-          - 'v22.03.4'
-          - 'v22.03.3'
-          - 'v22.03.2'
-          - 'v22.03.1'
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: 1. Checkout Kode Repositori Anda
+        uses: actions/checkout@v4
+
+      - name: 2. Instal Dependensi Build
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y build-essential clang flex bison g++ gawk gcc-multilib g++-multilib \
+          gettext git libncurses5-dev libssl-dev rsync unzip zlib1g-dev \
+          file wget
+
+      - name: 3. Clone dan Checkout Source OpenWrt
+        run: |
+          git clone https://git.openwrt.org/openwrt/openwrt.git
+          cd openwrt
+          git checkout ${{ inputs.openwrt_version }}
+
+      - name: 4. Perbarui Feeds & Terapkan Kustomisasi
+        run: |
+          cd openwrt
+          
+          # Perbarui dan instal feeds
+          ./scripts/feeds update -a
+          ./scripts/feeds install -a
+
+          # Salin file .config kustom
+          cp ../.config ./.config
+
+          # Salin patch DTS kustom jika ada
+          if [ -f "../999-linksys-wrt1200ac-single-partition.patch" ]; then
+            echo "==> Custom partition patch found. Applying..."
+            cp ../999-linksys-wrt1200ac-single-partition.patch ./target/linux/mvebu/patches-*/
+          fi
+
+          # Finalisasi konfigurasi
+          make defconfig
+
+      - name: 5. Kompilasi Firmware
+        run: |
+          cd openwrt
+          make -j$(nproc) download V=s
+          make -j$(nproc) V=s
+
+      - name: 6. Siapkan Artefak
+        run: |
+          mkdir -p artifacts
+          cp openwrt/bin/targets/mvebu/cortexa9/*sysupgrade.img artifacts/
+          cp openwrt/bin/targets/mvebu/cortexa9/sha256sums artifacts/
+          cp openwrt/.config artifacts/final.config
+
+      - name: 7. Unggah Artefak
+        uses: actions/upload-artifact@v4
+        with:
+          name: openwrt-firmware-${{ inputs.openwrt_version }}
+          path: artifacts/          - 'v22.03.1'
           - 'v22.03.0'
 
 jobs:
