@@ -1,12 +1,13 @@
-name: Build OpenWrt Linksys1200ac
+# Nama workflow yang akan muncul di tab Actions
+name: Build OpenWrt WRT1200AC
 
+# Pemicu workflow
 on:
   workflow_dispatch:
     inputs:
       openwrt_version:
         description: 'Pilih Branch/Tag OpenWrt (Spesifik)'
         required: true
-        # Default ke tag stabil terbaru
         default: 'v23.05.4'
         type: choice
         options:
@@ -38,15 +39,17 @@ on:
 
 jobs:
   build:
+    # Menggunakan workflow P3TERX yang sudah teruji
     uses: P3TERX/Actions-OpenWrt@main
+    # Menyediakan input untuk workflow P3TERX
     with:
       # URL Repositori OpenWrt
       REPO_URL: https://github.com/openwrt/openwrt
-      # Branch atau Tag yang akan di-build (mengambil dari input di atas)
+      # Branch atau Tag yang akan di-build
       REPO_BRANCH: ${{ inputs.openwrt_version }}
       # File .config yang akan digunakan
       CONFIG_FILE: .config
-      # Skrip kustom untuk menerapkan patch partisi kita
+      # Skrip kustom untuk menerapkan patch partisi
       DIY_P1_SH: |
         # Hanya jalankan jika file patch ada
         if [ -f "999-linksys-wrt1200ac-single-partition.patch" ]; then
