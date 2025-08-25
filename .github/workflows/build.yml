@@ -76,38 +76,4 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: openwrt-firmware-${{ inputs.openwrt_version }}
-          path: artifacts/          - 'v22.03.1'
-          - 'v22.03.0'
-
-jobs:
-  build:
-    # --- PERUBAHAN PENTING DIMULAI DI SINI ---
-    # Menentukan server virtual yang akan digunakan
-    runs-on: ubuntu-latest
-    # Mendefinisikan langkah-langkah yang akan dijalankan
-    steps:
-      # Langkah 1: Checkout repositori Anda agar bisa mengakses file .config dan .patch
-      - name: Checkout repository
-        uses: actions/checkout@v4
-
-      # Langkah 2: Menjalankan P3TERX Action
-      - name: Build OpenWrt with P3TERX Action
-        uses: P3TERX/Actions-OpenWrt@main
-        with:
-          # URL Repositori OpenWrt
-          REPO_URL: https://github.com/openwrt/openwrt
-          # Branch atau Tag yang akan di-build
-          REPO_BRANCH: ${{ inputs.openwrt_version }}
-          # File .config yang akan digunakan
-          CONFIG_FILE: .config
-          # Skrip kustom untuk menerapkan patch partisi
-          DIY_P1_SH: |
-            # Hanya jalankan jika file patch ada
-            if [ -f "999-linksys-wrt1200ac-single-partition.patch" ]; then
-              echo "==> Custom partition patch found. Applying..."
-              cp 999-linksys-wrt1200ac-single-partition.patch target/linux/mvebu/patches-*/
-            fi
-          # Nama file output
-          FIRMWARE_NAME: openwrt-wrt1200ac
-          # Zona waktu
-          TZ: Asia/Jakarta
+          path: artifacts/
