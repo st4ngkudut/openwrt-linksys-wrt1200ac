@@ -1,121 +1,59 @@
-name: Build OpenWrt Firmware (Advanced)
+name: Build OpenWrt Linksys1200ac
 
 on:
   workflow_dispatch:
     inputs:
       openwrt_version:
-        description: 'Pilih Versi OpenWrt (Spesifik)'
+        description: 'Pilih Branch/Tag OpenWrt (Spesifik)'
         required: true
-        default: '23.05.4'
+        # Default ke tag stabil terbaru
+        default: 'v23.05.4'
         type: choice
         options:
-          # Versi Snapshot
+          # --- Branch Development ---
           - 'main'
-          # Versi 24.10
-          - '24.10.2'
-          - '24.10.1'
-          - '24.10.0'
-          - '24.10'
-          # Versi 23.05
-          - '23.05.4'
-          - '23.05.3'
-          - '23.05.2'
-          - '23.05.1'
-          - '23.05.0'
-          - '23.05'
-          # Versi 22.03
-          - '22.03.6'
-          - '22.03.5'
-          - '22.03.4'
-          - '22.03.3'
-          - '22.03.2'
-          - '22.03.1'
-          - '22.03'
+          # --- Rilis Mayor (Branch) ---
+          - 'openwrt-24.10'
+          - 'openwrt-23.05'
+          - 'openwrt-22.03'
+          # --- Rilis Spesifik (Tag) ---
+          # Seri 24.10
+          - 'v24.10.2'
+          - 'v24.10.1'
+          - 'v24.10.0'
+          # Seri 23.05
+          - 'v23.05.4'
+          - 'v23.05.3'
+          - 'v23.05.2'
+          - 'v23.05.1'
+          - 'v23.05.0'
+          # Seri 22.03
+          - 'v22.03.6'
+          - 'v22.03.5'
+          - 'v22.03.4'
+          - 'v22.03.3'
+          - 'v22.03.2'
+          - 'v22.03.1'
+          - 'v22.03.0'
 
 jobs:
   build:
-    runs-on: ubuntu-latest
-
-    steps:
-      - name: Checkout repository
-        uses: actions/checkout@v4
-
-      - name: Install build dependencies
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y build-essential clang flex bison g++ gawk gcc-multilib g++-multilib \
-          gettext git libncurses5-dev libssl-dev rsync unzip zlib1g-dev \
-          file wget
-
-      - name: Clone and checkout OpenWrt source code
-        run: |
-          git clone https://git.openwrt.org/openwrt/openwrt.git
-          cd openwrt
-          VERSION="${{ inputs.openwrt_version }}"
-          REF_TO_CHECKOUT=""
-          if [[ "$VERSION" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
-            REF_TO_CHECKOUT="v$VERSION"
-          elif [[ "$VERSION" =~ ^[0-9]+\.[0-9]+$ ]]; then
-            REF_TO_CHECKOUT="openwrt-$VERSION"
-          else
-            REF_TO_CHECKOUT="main"
-          fi
-          echo "==> Checking out Git reference: $REF_TO_CHECKOUT"
-          git checkout "$REF_TO_CHECKOUT"
-
-      - name: Update OpenWrt feeds
-        run: |
-          cd openwrt
-          ./scripts/feeds update -a
-          ./scripts/feeds install -a
-
-      - name: Check for custom patch
-        id: check_patch
-        run: |
-          if [ -f "999-linksys-wrt1200ac-single-partition.patch" ]; then
-            echo "patch_exists=true" >> $GITHUB_OUTPUT
-          else
-            echo "patch_exists=false" >> $GITHUB_OUTPUT
-          fi
-
-      - name: Copy custom DTS patch (if it exists)
-        if: steps.check_patch.outputs.patch_exists == 'true'
-        run: |
+    uses: P3TERX/Actions-OpenWrt@main
+    with:
+      # URL Repositori OpenWrt
+      REPO_URL: https://github.com/openwrt/openwrt
+      # Branch atau Tag yang akan di-build (mengambil dari input di atas)
+      REPO_BRANCH: ${{ inputs.openwrt_version }}
+      # File .config yang akan digunakan
+      CONFIG_FILE: .config
+      # Skrip kustom untuk menerapkan patch partisi kita
+      DIY_P1_SH: |
+        # Hanya jalankan jika file patch ada
+        if [ -f "999-linksys-wrt1200ac-single-partition.patch" ]; then
           echo "==> Custom partition patch found. Applying..."
-          cp 999-linksys-wrt1200ac-single-partition.patch openwrt/target/linux/mvebu/patches-*/
-      
-      - name: Generate custom config from package list
-        run: |
-          cd openwrt
-          echo "==> Generating configuration..."
-          echo "CONFIG_TARGET_mvebu_cortexa9=y" > .config
-          echo "CONFIG_TARGET_mvebu_cortexa9_DEVICE_linksys_wrt1200ac=y" >> .config
-          if [ -f "../packages.txt" ]; then
-            echo "==> Adding packages from packages.txt..."
-            cat ../packages.txt >> .config
-          fi
-          make defconfig
-
-      - name: Compile firmware
-        # '|| true' ditambahkan agar workflow tidak berhenti jika kompilasi gagal
-        # Ini memungkinkan kita untuk mengunggah log dan file output parsial untuk debug
-        run: |
-          cd openwrt
-          echo "==> Compiling firmware..."
-          make -j$(nproc) download V=s
-          make -j$(nproc) V=s || true
-
-      - name: Prepare build outputs for upload
-        run: |
-          # Menyalin file .config yang digunakan ke dalam direktori output untuk referensi
-          cp openwrt/.config openwrt/bin/targets/mvebu/cortexa9/final.config
-          # Menyalin log build ke dalam direktori output
-          cd openwrt/logs && find . -type f -print0 | xargs -0 tar -czvf /tmp/logs.tar.gz && cd -
-          cp /tmp/logs.tar.gz openwrt/bin/targets/mvebu/cortexa9/build_logs.tar.gz
-
-      - name: Upload all build outputs as artifact
-        uses: actions/upload-artifact@v4
-        with:
-          name: openwrt-build-outputs-${{ inputs.openwrt_version }}
-          # Mengunggah seluruh isi direktori output
-          path: openwrt/bin/targets/mvebu/cortexa9/
+          cp 999-linksys-wrt1200ac-single-partition.patch target/linux/mvebu/patches-*/
+        fi
+      # Nama file output
+      FIRMWARE_NAME: openwrt-wrt1200ac
+      # Zona waktu
+      TZ: Asia/Jakarta
