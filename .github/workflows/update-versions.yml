@@ -1,0 +1,36 @@
+name: "Update OpenWrt Versions"
+
+on:
+  schedule:
+    - cron: "0 0 * * 0"   # tiap minggu (Minggu jam 00:00 UTC)
+  workflow_dispatch:
+
+jobs:
+  update-versions:
+    runs-on: ubuntu-latest
+    steps:
+      - name: 1. Checkout Repo
+        uses: actions/checkout@v4
+
+      - name: 2. Ambil daftar rilis OpenWrt
+        run: |
+          mkdir -p .github/versions
+          curl -s https://downloads.openwrt.org/releases/ \
+            | grep -Eo 'v[0-9]+\.[0-9]+\.[0-9]+' \
+            | sort -Vr \
+            | uniq \
+            | head -n 10 > .github/versions/releases.txt
+          echo "main" >> .github/versions/releases.txt
+          cat .github/versions/releases.txt
+
+      - name: 3. Update workflow build.yml
+        run: |
+          VERSIONS=$(cat .github/versions/releases.txt | sed 's/^/          - /')
+          sed -i '/options:/,/custom_packages:/c\        options:\n'"$VERSIONS"$'\n      custom_packages:' .github/workflows/build.yml
+
+      - name: 4. Commit & Push Perubahan
+        uses: stefanzweifel/git-auto-commit-action@v5
+        with:
+          commit_message: "chore: update OpenWrt versions list"
+          branch: main
+          
