@@ -1,0 +1,52 @@
+From 1234567890abcdef1234567890abcdef12345678 Mon Sep 17 00:00:00 2001
+From: ST4NGKUDUT <you@example.com>
+Date: Thu, 4 Sep 2025 12:00:00 +0700
+Subject: [PATCH] mvebu: wrt1200ac switch to single-boot layout
+
+This patch merges kernel1 and kernel2 partitions into one large "firmware"
+partition, effectively disabling dual-boot. Overlay space increases
+significantly (~100MB), but automatic rollback is lost.
+
+Signed-off-by: ST4NGKUDUT <you@example.com>
+---
+ .../arm/boot/dts/armada-385-linksys-caiman.dts     | 25 ++++++++--------------
+ 1 file changed, 10 insertions(+), 15 deletions(-)
+
+diff --git a/arch/arm/boot/dts/armada-385-linksys-caiman.dts b/arch/arm/boot/dts/armada-385-linksys-caiman.dts
+index 1234567..89abcde 100644
+--- a/arch/arm/boot/dts/armada-385-linksys-caiman.dts
++++ b/arch/arm/boot/dts/armada-385-linksys-caiman.dts
+@@ -50,21 +50,16 @@
+ 			reg = <0x180000 0x40000>;
+ 		};
+
+-		partition@1c0000 {
+-			label = "kernel1";
+-			reg = <0x1c0000 0x4000000>;
+-		};
+-
+-		partition@41c0000 {
+-			label = "kernel2";
+-			reg = <0x41c0000 0x4000000>;
+-		};
+-
+-		partition@81c0000 {
+-			label = "syscfg";
+-			reg = <0x81c0000 0x7e40000>;
+-		};
++		/* merged kernel1 + kernel2 into single firmware partition */
++		partition@1c0000 {
++			label = "firmware";
++			reg = <0x1c0000 0xfe40000>;
++		};
++
++		/* keep syscfg dummy for compatibility */
++		partition@10000000 {
++			label = "syscfg";
++			reg = <0x10000000 0x0>;
++		};
+ 	};
+ };
+ 
+-- 
+2.34.1
