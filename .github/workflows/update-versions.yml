@@ -33,4 +33,4 @@ jobs:
         with:
           commit_message: "chore: update OpenWrt versions list"
           branch: main
-          
+          token: ${{ secrets.PAT_TOKEN }}
