@@ -1,0 +1,118 @@
+name: 'Build OpenWrt Linksys WRT1200AC (Single-Boot, Repo-Compatible)'
+
+on:
+  workflow_dispatch:
+    inputs:
+      openwrt_version:
+        description: 'Pilih Versi/Tag OpenWrt (Daftar ini diperbarui otomatis)'
+        required: true
+        type: choice
+        default: 'v23.05.4'
+        options:
+          - 'v23.05.4'
+          - 'v23.05.3'
+          - 'main'
+      custom_packages:
+        description: 'Paket tambahan (pisahkan spasi), contoh: nano luci-app-adblock'
+        required: false
+        type: string
+        default: ''
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - name: 1. Checkout Kode Repositori
+        uses: actions/checkout@v4
+
+      - name: 2. Instal Dependensi Build
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y ack antlr3 asciidoc autoconf automake autopoint binutils bison build-essential bzip2 ccache cmake cpio curl device-tree-compiler fastjar flex gawk gettext gcc-multilib g++-multilib git gperf haveged help2man intltool libc6-dev-i386 libelf-dev libglib2.0-dev libgmp3-dev libltdl-dev libmpc-dev libmpfr-dev libncurses5-dev libncursesw5-dev libreadline-dev libssl-dev libtool lrzsz mkisofs msmtp nano ninja-build p7zip p7zip-full patch pkg-config python3 python3-pyelftools libpython3-dev qemu-utils rsync scons squashfs-tools subversion swig texinfo uglifyjs upx-ucl unzip vim wget xmlto xxd zlib1g-dev
+
+      - name: 3. Clone Repositori OpenWrt (Shallow Clone)
+        run: |
+          VERSION="${{ github.event.inputs.openwrt_version }}"
+          echo "Cloning OpenWrt version: $VERSION"
+          if [ "$VERSION" = "main" ]; then
+            git clone --depth 1 https://git.openwrt.org/openwrt/openwrt.git
+          else
+            git clone --depth 1 --branch "$VERSION" https://git.openwrt.org/openwrt/openwrt.git
+          fi
+
+      - name: 4. Atur Cache Build
+        uses: actions/cache@v4
+        with:
+          path: |
+            openwrt/staging_dir
+            openwrt/dl
+            openwrt/.ccache
+          key: ${{ runner.os }}-openwrt-${{ github.event.inputs.openwrt_version }}-${{ hashFiles('**/patches/*.patch') }}
+          restore-keys: |
+            ${{ runner.os }}-openwrt-${{ github.event.inputs.openwrt_version }}-
+
+      - name: 5. Perbarui Feeds
+        working-directory: ./openwrt
+        run: |
+          echo "BUILD_DATE=$(date +%Y-%m-%d)" >> $GITHUB_ENV
+          ./scripts/feeds update -a
+          ./scripts/feeds install -a
+
+      - name: 6. Terapkan Konfigurasi & Patch Kustom
+        working-directory: ./openwrt
+        run: |
+          VERSION_TAG=$(echo "${{ github.event.inputs.openwrt_version }}" | sed 's/v//')
+          if [ "${{ github.event.inputs.openwrt_version }}" != "main" ]; then
+            wget https://downloads.openwrt.org/releases/$VERSION_TAG/targets/mvebu/cortexa9/config.buildinfo -O .config
+          else
+            cp defconfig .config
+          fi
+
+          # Gunakan single-boot DTS
+          echo "CONFIG_TARGET_DEVICE_mvebu_cortexa9_DEVICE_linksys_caiman=y" >> .config
+          echo "CONFIG_PACKAGE_luci=y" >> .config
+          echo 'CONFIG_CCACHE=y' >> .config
+          if [ -n "${{ github.event.inputs.custom_packages }}" ]; then
+            for PKG in ${{ github.event.inputs.custom_packages }}; do
+              echo "CONFIG_PACKAGE_${PKG}=y" >> .config
+            done
+          fi
+
+          # Terapkan patch single-boot
+          for p in ../patches/*.patch; do
+            echo "Applying $p"
+            patch -p1 < "$p"
+          done
+
+          make defconfig
+
+      - name: 7. Mulai Proses Build
+        working-directory: ./openwrt
+        env:
+          USE_CCACHE: 1
+        run: |
+          make -j$(nproc) download
+          make -j$(nproc) V=sc world
+
+      - name: 8. Unggah Artefak Build
+        uses: actions/upload-artifact@v4
+        with:
+          name: WRT1200AC-SingleBoot-${{ github.event.inputs.openwrt_version }}-${{ env.BUILD_DATE }}
+          path: |
+            ./openwrt/bin/targets/mvebu/cortexa9/*-factory.img
+            ./openwrt/bin/targets/mvebu/cortexa9/*-sysupgrade.bin
+            ./openwrt/bin/targets/mvebu/cortexa9/config.buildinfo
+
+      - name: 9. Unggah Firmware ke GitHub Release
+        if: success()
+        uses: softprops/action-gh-release@v1
+        with:
+          files: ./openwrt/bin/targets/mvebu/cortexa9/*
+          tag_name: WRT1200AC-SingleBoot-${{ github.event.inputs.openwrt_version }}-${{ env.BUILD_DATE }}
+          name: Linksys WRT1200AC OpenWrt ${{ github.event.inputs.openwrt_version }} (Single-Boot)
+          body: |
+            Build otomatis firmware OpenWrt untuk **Linksys WRT1200AC (caiman)** dengan layout **single boot**.
+            - Versi OpenWrt: ${{ github.event.inputs.openwrt_version }}
+            - Paket Tambahan: ${{ github.event.inputs.custom_packages }}
+            - Tanggal Build: ${{ env.BUILD_DATE }}
+            - Catatan: Dual-boot dihapus, hanya ada satu partisi firmware (~126 MB).
