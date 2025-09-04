@@ -3,50 +3,56 @@ From: ST4NGKUDUT <you@example.com>
 Date: Thu, 4 Sep 2025 12:00:00 +0700
 Subject: [PATCH] mvebu: wrt1200ac switch to single-boot layout
 
-This patch merges kernel1 and kernel2 partitions into one large "firmware"
-partition, effectively disabling dual-boot. Overlay space increases
-significantly (~100MB), but automatic rollback is lost.
+This patch merges kernel1+rootfs1 and kernel2+rootfs2 partitions into
+a single "firmware" partition. The device no longer dual-boots, but
+gains a much larger overlay (≈100 MB usable).
 
 Signed-off-by: ST4NGKUDUT <you@example.com>
 ---
- .../arm/boot/dts/armada-385-linksys-caiman.dts     | 25 ++++++++--------------
- 1 file changed, 10 insertions(+), 15 deletions(-)
+ target/linux/mvebu/files/arch/arm/boot/dts/armada-385-linksys-caiman.dts | 24 ++++++++++++++----------
+ 1 file changed, 14 insertions(+), 10 deletions(-)
 
-diff --git a/arch/arm/boot/dts/armada-385-linksys-caiman.dts b/arch/arm/boot/dts/armada-385-linksys-caiman.dts
+diff --git a/target/linux/mvebu/files/arch/arm/boot/dts/armada-385-linksys-caiman.dts b/target/linux/mvebu/files/arch/arm/boot/dts/armada-385-linksys-caiman.dts
 index 1234567..89abcde 100644
---- a/arch/arm/boot/dts/armada-385-linksys-caiman.dts
-+++ b/arch/arm/boot/dts/armada-385-linksys-caiman.dts
-@@ -50,21 +50,16 @@
- 			reg = <0x180000 0x40000>;
+--- a/target/linux/mvebu/files/arch/arm/boot/dts/armada-385-linksys-caiman.dts
++++ b/target/linux/mvebu/files/arch/arm/boot/dts/armada-385-linksys-caiman.dts
+@@ -90,22 +90,26 @@
+ 			reg = <0x00000000 0x00100000>;
  		};
 
--		partition@1c0000 {
--			label = "kernel1";
--			reg = <0x1c0000 0x4000000>;
+-		partition@100000 {
+-			label = "u_env";
+-			reg = <0x00100000 0x00100000>;
 -		};
 -
--		partition@41c0000 {
--			label = "kernel2";
--			reg = <0x41c0000 0x4000000>;
+-		partition@200000 {
+-			label = "s_env";
+-			reg = <0x00200000 0x00100000>;
 -		};
 -
--		partition@81c0000 {
--			label = "syscfg";
--			reg = <0x81c0000 0x7e40000>;
+-		partition@300000 {
+-			label = "devinfo";
+-			reg = <0x00300000 0x00100000>;
 -		};
-+		/* merged kernel1 + kernel2 into single firmware partition */
-+		partition@1c0000 {
-+			label = "firmware";
-+			reg = <0x1c0000 0xfe40000>;
++		partition@100000 {
++			label = "u_env";
++			reg = <0x00100000 0x00100000>;
 +		};
 +
-+		/* keep syscfg dummy for compatibility */
-+		partition@10000000 {
-+			label = "syscfg";
-+			reg = <0x10000000 0x0>;
++		partition@200000 {
++			label = "s_env";
++			reg = <0x00200000 0x00100000>;
++		};
++
++		partition@300000 {
++			label = "devinfo";
++			reg = <0x00300000 0x00100000>;
++		};
++
++		/* merged single firmware partition */
++		partition@400000 {
++			label = "firmware";
++			reg = <0x00400000 0x07c00000>;
 +		};
  	};
  };
- 
--- 
-2.34.1
